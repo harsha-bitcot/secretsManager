@@ -54,6 +54,7 @@ class SecretsController extends Controller
         if (!$result && $update)
         {
             Cache::put($this->cacheKey,  Crypt::encryptString($aws));
+            config(['secrets' => json_decode($aws)]);
         }
         return $result;
     }
