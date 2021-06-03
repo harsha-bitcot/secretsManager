@@ -1,6 +1,6 @@
 <?php
 
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -15,10 +15,16 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::get('/', function () {
-//    $cache = Cache::get('awsSecrets');
-//    dd($cache->key1);
-
     dd(Config::get('secrets')->key2);
-//    dd(env('lakalaka'));
     return view('welcome');
 });
+
+
+//Route::get('/test', function () {
+//    if (Config::get('secrets')->key2 === 'value2'){
+//        dd('we have the latest secret');
+//    }else {
+//        dd('we have an outdated secret');
+//    }
+//    dd('end');
+//});

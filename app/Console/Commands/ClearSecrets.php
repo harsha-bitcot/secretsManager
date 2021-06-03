@@ -38,11 +38,12 @@ class ClearSecrets extends Command
      */
     public function handle(SecretsController $secretsController)
     {
-        $secrets = $secretsController->clearSecrets();
-        if ($secrets){
-            $this->error('Something went wrong!');
-        }else {
+//        $success = $secretsController->isLatest();
+        $success = $secretsController->clearSecrets();
+        if ($success){
             $this->info('The command was successful!');
+        }else {
+            $this->error('Something went wrong!');
         }
         return 0;
     }

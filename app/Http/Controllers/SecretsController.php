@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
+use Illuminate\Http\Request; // todo move everything to utils if no http(s) requests are not involved?
 use Aws\SecretsManager\SecretsManagerClient;
 use Aws\Exception\AwsException;
 use Illuminate\Support\Facades\Cache;
@@ -11,15 +11,20 @@ use Illuminate\Support\Facades\Crypt;
 
 class SecretsController extends Controller
 {
+    /**
+     * @var string
+     */
+    private $cacheKey;
+
     public function __construct()
     {
-        //
+        $this->cacheKey = 'awsSecrets';
     }
-// todo 1-store string in cache instead of object 2- encrypt string
 
     public function getSecrets()
     {
-        $secrets = Cache::rememberForever('awsSecrets', function () {
+//        error_log('Some message here.');
+        $secrets = Cache::rememberForever($this->cacheKey, function () {
             return  Crypt::encryptString($this->fetchSecrets());
         });
         try {
@@ -30,25 +35,25 @@ class SecretsController extends Controller
         return json_decode($decrypted);
     }
 
-    public function clearSecrets()
+    public function clearSecrets(): bool
     {
-        Cache::forget('awsSecrets');
-        return Cache::get('awsSecrets');
+        Cache::forget($this->cacheKey);
+        return Cache::get($this->cacheKey) == null;
     }
 
-    public function isLatest(): bool
+    public function isLatest($update = true): bool
     {
         $aws = $this->fetchSecrets();
-        $cache = Cache::get('awsSecrets');
+        $cache = Cache::get($this->cacheKey);
         try {
             $cache = Crypt::decryptString($cache);
         } catch (DecryptException $e) {
             $cache = null;
         }
-        $result = $aws === $cache; // todo test this
-        if (!$result)
+        $result = $aws === $cache;
+        if (!$result && $update)
         {
-            Cache::put('awsSecrets',  Crypt::encryptString($aws));
+            Cache::put($this->cacheKey,  Crypt::encryptString($aws));
         }
         return $result;
     }
@@ -107,7 +112,6 @@ class SecretsController extends Controller
 
         //we are assuming that $secret will either contains a json string or null
         return $secret;
-//        return json_decode($secret);
     }
 
 }
