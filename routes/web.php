@@ -22,24 +22,26 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-Route::get('/manual/update/{key}', function ($key) {
+Route::get('/manual/{key}', function ($key) {
     dd(isset(Config::get('secrets')->$key)?Config::get('secrets')->$key:null);
 });
 
-Route::get('/automatic/update/{key}/{value}', function ($key, $expectedValue) {
+Route::get('/automatic/{key}/{value}', function ($key, $expectedValue) {
     function apiCallSimulation($key, $expectedValue, $secondTry = false){
-        if (!isset(Config::get('secrets')->$key)) return null;
-        if (Config::get('secrets')->$key === $expectedValue){
+//        if (!isset(Config::get('secrets')->$key)) return null;
+        if (isset(Config::get('secrets')->$key) && Config::get('secrets')->$key === $expectedValue){
             return Config::get('secrets')->$key;
         }else {
             $secretsController = new SecretsController;
             if ($secretsController->isLatest()){
+                // todo add something that registers this api key as not working so that we can stop pinging AWS until it is resolved
+                if (!isset(Config::get('secrets')->$key)) return 'no key exists with the name: ' . $key;
                 return 'Latest secret from aws does not match with the expected value';
             }
             if (!$secondTry){
                 return apiCallSimulation($key, $expectedValue,true);
             }
-            // todo add something that registers this api key as not working so that we can stop pinging AWS everytime
+            // todo add something that registers this api key as not working so that we can stop pinging AWS until it is resolved
             return 'Unknown failure/unable to save latest secrets from aws';
         }
     }
