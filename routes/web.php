@@ -50,20 +50,23 @@ Route::get('/automatic/{key}/{value}', function ($key, $expectedValue) {
 
 
 Route::get('/test', function () {
-     function apiCall($secondTry = false){
-        if (Config::get('secrets')->key2 === 'valueB'){
-            return 'API call success';
-        }else {
-            $secretsController = new SecretsController;
-            if ($secretsController->isLatest()){
-                return 'API called failed: we have latest secret from aws';
-            }
-            if (!$secondTry){
-                return apiCall(true);
-            }
-            return 'API call failed';
-        }
+    $retryCount = 'asd';
+    switch (true) {
+//        case !is_numeric($retryCount):
+//            $final = 'yes';
+//            break;
+
+        case $retryCount <= 10:
+            $final = 'less';
+            break;
+
+        case $retryCount > 10:
+            return 'lsks';
+            break;
+
+        default:
+            $final = 'none';
+            break;
     }
-    $final = apiCall();
-    dd($final);
+    dd($retryCount);
 });

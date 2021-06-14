@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request; // todo move everything to utils if no http(s) requests are not involved?
+use Illuminate\Http\Request; // todo move everything to utils if no http(s) requests are involved?
 use Aws\SecretsManager\SecretsManagerClient;
 use Aws\Exception\AwsException;
 use Illuminate\Support\Facades\Cache;
@@ -15,10 +15,12 @@ class SecretsController extends Controller
      * @var string
      */
     private $cacheKey;
+    private $retryCount;
 
     public function __construct()
     {
         $this->cacheKey = 'awsSecrets';
+        $this->retryCount = 'secretsRetry';
     }
 
     public function getSecrets()
@@ -41,8 +43,23 @@ class SecretsController extends Controller
         return Cache::get($this->cacheKey) == null;
     }
 
-    public function isLatest($update = true): bool
+    public function isLatest($key, $update = true): bool
     {
+        $retryKey = $this->retryCount . $key;
+        $retryCount = Cache::get($retryKey);
+        switch (true) {
+            /** @noinspection PhpDuplicateSwitchCaseBodyInspection */ case !is_numeric($retryCount):
+                Cache::put($retryKey,  1);
+                break;
+            case $retryCount <= 10:
+                Cache::increment($retryKey);
+                break;
+            case $retryCount > 10:
+                return true;
+            default:
+                Cache::put($retryKey,  1);
+                break;
+        }
         $aws = $this->fetchSecrets();
         $cache = Cache::get($this->cacheKey);
         try {
