@@ -23,17 +23,17 @@ Route::get('/', function () {
 });
 
 Route::get('/manual/{key}', function ($key) {
-    dd(isset(Config::get('secrets')->$key)?Config::get('secrets')->$key:null);
+    $secretsController = new SecretsController;
+    dd($secretsController->get($key));
 });
 
 Route::get('/automatic/{key}/{value}', function ($key, $expectedValue) {
     function apiCallSimulation($key, $expectedValue, $secondTry = false){
-//        if (!isset(Config::get('secrets')->$key)) return null;
-        if (isset(Config::get('secrets')->$key) && Config::get('secrets')->$key === $expectedValue){
-            return Config::get('secrets')->$key;
+        $secretsController = new SecretsController;
+        if ($secretsController->get($key) === $expectedValue){
+            return $secretsController->get($key);
         }else {
-            $secretsController = new SecretsController;
-            if ($secretsController->isLatest()){
+            if ($secretsController->isLatest($key)){
                 // todo add something that registers this api key as not working so that we can stop pinging AWS until it is resolved
                 if (!isset(Config::get('secrets')->$key)) return 'no key exists with the name: ' . $key;
                 return 'Latest secret from aws does not match with the expected value';
@@ -50,6 +50,29 @@ Route::get('/automatic/{key}/{value}', function ($key, $expectedValue) {
 
 
 Route::get('/test', function () {
+    $a = array(
+        'key1' => array(
+            'value' => 'value1',
+            'retry_count' => 1,
+            'status' => 'active',
+        ),
+        'key2' => array(
+            'value' => 'value2',
+            'retry_count' => 3,
+            'status' => 'active',
+        ),
+        'key3' => array(
+            'value' => 'value3',
+            'retry_count' => 11,
+            'status' => 'failed',
+        )
+    );
+    dd(isset($a['key4']));
+
+    $secretsController = new SecretsController;
+    $secret = $secretsController->get('key2');
+    dd($secret);
+    Config::set(['secrets' => $secrets]);
     $retryCount = 'asd';
     switch (true) {
 //        case !is_numeric($retryCount):

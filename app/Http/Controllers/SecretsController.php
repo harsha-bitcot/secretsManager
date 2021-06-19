@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use Exception;
 use Illuminate\Http\Request; // todo move everything to utils if no http(s) requests are involved?
 use Aws\SecretsManager\SecretsManagerClient;
 use Aws\Exception\AwsException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Facades\Crypt;
+use stdClass;
 
 class SecretsController extends Controller
 {
@@ -16,56 +18,99 @@ class SecretsController extends Controller
      */
     private $cacheKey;
     private $retryCount;
+    private $suspendedKeys;
 
     public function __construct()
     {
         $this->cacheKey = 'awsSecrets';
         $this->retryCount = 'secretsRetry';
+        $this->suspendedKeys = 'suspendedSecrets';
     }
 
-    public function getSecrets()
-    {
-//        error_log('Some message here.');
-        $secrets = Cache::rememberForever($this->cacheKey, function () {
-            return  Crypt::encryptString($this->fetchSecrets());
-        });
-        try {
-            $decrypted = Crypt::decryptString($secrets);
-        } catch (DecryptException $e) {
-            $decrypted = null;
+    /**
+     * @throws Exception
+     */
+    public function get($key){
+        if ($this->noService()){
+            return null;
         }
-        return json_decode($decrypted);
+        $secrets = $this->fetchSecrets();
+        return property_exists($secrets, $key)? $secrets->$key : null;
+    }
+
+    /**
+     * @throws Exception
+     */
+    public function getAll()
+    {
+        if ($this->noService()){
+            return new stdClass();
+        }
+//        error_log('Some message here.');
+        return $this->fetchSecrets();
     }
 
     public function clearSecrets(): bool
     {
+        if ($this->noService()){
+            return false;
+        }
         Cache::forget($this->cacheKey);
         return Cache::get($this->cacheKey) == null;
     }
 
+    /**
+     * @throws Exception
+     */
     public function isLatest($key, $update = true): bool
     {
+        if ($this->noService()){
+            return false;
+        }
         $retryKey = $this->retryCount . $key;
         $retryCount = Cache::get($retryKey);
+        $suspendedKeys = Cache::get($this->suspendedKeys);
+//        Cache::put($retryKey,  1);
+//        dd($retryCount);
+//        dd($suspendedKeys) ;
+        if ($suspendedKeys === null){
+            $suspendedKeys = [];
+        }
         switch (true) {
             /** @noinspection PhpDuplicateSwitchCaseBodyInspection */ case !is_numeric($retryCount):
+                if (($suspendedKey = array_search($key, $suspendedKeys)) !== false) {
+                    unset($suspendedKeys[$suspendedKey]);
+                }
                 Cache::put($retryKey,  1);
                 break;
             case $retryCount <= 10:
+                if (($suspendedKey = array_search($key, $suspendedKeys)) !== false) {
+                    unset($suspendedKeys[$suspendedKey]);
+                }
                 Cache::increment($retryKey);
                 break;
             case $retryCount > 10:
+                array_push($suspendedKeys,$key);
+                $suspendedKeys = array_flip($suspendedKeys);
+                $suspendedKeys = array_flip($suspendedKeys);
+                $suspendedKeys = array_values($suspendedKeys);
+                Cache::put($this->suspendedKeys, $suspendedKeys);
                 return true;
             default:
+                if (($suspendedKey = array_search($key, $suspendedKeys)) !== false) {
+                    unset($suspendedKeys[$suspendedKey]);
+                }
                 Cache::put($retryKey,  1);
                 break;
         }
-        $aws = $this->fetchSecrets();
+        $suspendedKeys = array_values($suspendedKeys);
+        Cache::put($this->suspendedKeys, $suspendedKeys);
+        $aws = $this->fetchSecretsFromAWS();
         $cache = Cache::get($this->cacheKey);
         try {
             $cache = Crypt::decryptString($cache);
         } catch (DecryptException $e) {
-            $cache = null;
+            throw new Exception("SecretsDecryptionFailureException");
         }
         $result = $aws === $cache;
         if (!$result && $update)
@@ -76,7 +121,23 @@ class SecretsController extends Controller
         return $result;
     }
 
+    /**
+     * @throws Exception
+     */
     private function fetchSecrets()
+    {
+        $secrets = Cache::rememberForever($this->cacheKey, function () {
+            return  Crypt::encryptString($this->fetchSecretsFromAWS());
+        });
+        try {
+            $decrypted = Crypt::decryptString($secrets);
+        } catch (DecryptException $e) {
+            throw new Exception("SecretsDecryptionFailureException");
+        }
+        return json_decode($decrypted);
+    }
+
+    private function fetchSecretsFromAWS()
     {
         // Create a Secrets Manager Client
         $client = new SecretsManagerClient([
@@ -132,4 +193,11 @@ class SecretsController extends Controller
         return $secret;
     }
 
+    private function noService(): bool
+    {
+        if (env('APP_KEY') === '' || env('APP_KEY' === null)){
+            return true;
+        }
+        return false;
+    }
 }

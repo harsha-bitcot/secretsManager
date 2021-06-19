@@ -3,8 +3,6 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Facades\Config;
-use App\Http\Controllers\SecretsController;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -25,8 +23,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot()
     {
-        $secretsController = new SecretsController;
-        $secrets = $secretsController->getSecrets();
-        Config::set(['secrets' => $secrets]);
+        //
     }
 }
