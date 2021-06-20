@@ -17,8 +17,8 @@ class SecretsController extends Controller
      * @var string
      */
     private $cacheKey;
-    private $retryCount;
-    private $suspendedKeys;
+    private $retryCount; //todo delete all ref
+    private $suspendedKeys; //todo delete all ref
 
     public function __construct()
     {
@@ -35,7 +35,7 @@ class SecretsController extends Controller
             return null;
         }
         $secrets = $this->fetchSecrets();
-        return property_exists($secrets, $key)? $secrets->$key : null;
+        return property_exists($secrets, $key) ? $secrets->$key->value : null;
     }
 
     /**
@@ -46,8 +46,22 @@ class SecretsController extends Controller
         if ($this->noService()){
             return new stdClass();
         }
-//        error_log('Some message here.');
-        return $this->fetchSecrets();
+        $secrets = $this->fetchSecrets();
+        foreach ($secrets as $key=>$value){
+            $secrets->$key = $value->value;
+        }
+        return $secrets;
+    }
+
+    public function markWorking($key): bool
+    {
+        $secrets = Cache::get($this->cacheKey);
+        if ($secrets->$key->retryCount != 0){
+            $secrets->$key->retryCount = 0;
+            $secrets->$key->status = 'active';
+        }
+        Cache::put($this->cacheKey, $secrets);
+        return true;
     }
 
     public function clearSecrets(): bool
@@ -56,7 +70,7 @@ class SecretsController extends Controller
             return false;
         }
         Cache::forget($this->cacheKey);
-        return Cache::get($this->cacheKey) == null;
+        return Cache::get($this->cacheKey) === null;
     }
 
     /**
@@ -67,58 +81,53 @@ class SecretsController extends Controller
         if ($this->noService()){
             return false;
         }
-        $retryKey = $this->retryCount . $key;
-        $retryCount = Cache::get($retryKey);
-        $suspendedKeys = Cache::get($this->suspendedKeys);
+        $secrets = $this->fetchSecrets();
+//        $retryKey = $this->retryCount . $key;
+        $retryCount = $secrets->$key->retryCount;
+//        $suspendedKeys = Cache::get($this->suspendedKeys);
 //        Cache::put($retryKey,  1);
 //        dd($retryCount);
 //        dd($suspendedKeys) ;
-        if ($suspendedKeys === null){
-            $suspendedKeys = [];
-        }
+//        if ($suspendedKeys === null){
+//            $suspendedKeys = [];
+//        }
         switch (true) {
             /** @noinspection PhpDuplicateSwitchCaseBodyInspection */ case !is_numeric($retryCount):
-                if (($suspendedKey = array_search($key, $suspendedKeys)) !== false) {
-                    unset($suspendedKeys[$suspendedKey]);
-                }
-                Cache::put($retryKey,  1);
+                $secrets->$key->retryCount = 1;
+                $secrets->$key->status = 'failing';
                 break;
             case $retryCount <= 10:
-                if (($suspendedKey = array_search($key, $suspendedKeys)) !== false) {
-                    unset($suspendedKeys[$suspendedKey]);
-                }
-                Cache::increment($retryKey);
+                $secrets->$key->retryCount++;
+                $secrets->$key->status = 'failing';
                 break;
             case $retryCount > 10:
-                array_push($suspendedKeys,$key);
-                $suspendedKeys = array_flip($suspendedKeys);
-                $suspendedKeys = array_flip($suspendedKeys);
-                $suspendedKeys = array_values($suspendedKeys);
-                Cache::put($this->suspendedKeys, $suspendedKeys);
+                $secrets->$key->status = 'failed';
+                $this->updateSecrets($secrets);
                 return true;
             default:
-                if (($suspendedKey = array_search($key, $suspendedKeys)) !== false) {
-                    unset($suspendedKeys[$suspendedKey]);
-                }
-                Cache::put($retryKey,  1);
+                $secrets->$key->retryCount = 1;
+                $secrets->$key->status = 'failing';
                 break;
         }
-        $suspendedKeys = array_values($suspendedKeys);
-        Cache::put($this->suspendedKeys, $suspendedKeys);
-        $aws = $this->fetchSecretsFromAWS();
-        $cache = Cache::get($this->cacheKey);
-        try {
-            $cache = Crypt::decryptString($cache);
-        } catch (DecryptException $e) {
-            throw new Exception("SecretsDecryptionFailureException");
-        }
-        $result = $aws === $cache;
+        $this->updateSecrets($secrets);
+        $aws = json_decode($this->fetchSecretsFromAWS());
+        $result = $aws->$key === $secrets->$key->value;
         if (!$result && $update)
         {
-            Cache::put($this->cacheKey,  Crypt::encryptString($aws));
-            config(['secrets' => json_decode($aws)]);
+            Cache::forget($this->cacheKey);
         }
         return $result;
+    }
+
+    /**
+     * @throws Exception
+     */
+    private function updateSecrets($secrets){
+        foreach ($secrets as $key=>$value){
+            $secrets->$key->value = Crypt::encryptString($value->value);
+        }
+        Cache::put($this->cacheKey, $secrets);
+        $this->decryptSecrets($secrets);
     }
 
     /**
@@ -127,14 +136,19 @@ class SecretsController extends Controller
     private function fetchSecrets()
     {
         $secrets = Cache::rememberForever($this->cacheKey, function () {
-            return  Crypt::encryptString($this->fetchSecretsFromAWS());
+            $awsKeys = json_decode($this->fetchSecretsFromAWS());
+            $secrets = new stdClass();
+            foreach ($awsKeys as $key=>$value){
+                $secrets->$key = new stdClass();
+                $secrets->$key->value = Crypt::encryptString($value);
+                $secrets->$key->retryCount = 0;
+                $secrets->$key->status = 'active';
+            }
+            return $secrets;
         });
-        try {
-            $decrypted = Crypt::decryptString($secrets);
-        } catch (DecryptException $e) {
-            throw new Exception("SecretsDecryptionFailureException");
-        }
-        return json_decode($decrypted);
+        $this->decryptSecrets($secrets);
+//        dd($secrets);
+        return $secrets;
     }
 
     private function fetchSecretsFromAWS()
@@ -191,6 +205,17 @@ class SecretsController extends Controller
 
         //we are assuming that $secret will either contains a json string or null
         return $secret;
+    }
+
+    private function decryptSecrets($secrets): void
+    {
+        foreach ($secrets as $key=>$value){
+            try {
+                $secrets->$key->value = Crypt::decryptString($value->value);
+            } catch (DecryptException $e) {
+                throw new Exception("SecretsDecryptionFailureException");
+            }
+        }
     }
 
     private function noService(): bool

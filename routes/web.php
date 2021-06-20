@@ -31,11 +31,11 @@ Route::get('/automatic/{key}/{value}', function ($key, $expectedValue) {
     function apiCallSimulation($key, $expectedValue, $secondTry = false){
         $secretsController = new SecretsController;
         if ($secretsController->get($key) === $expectedValue){
+            $secretsController->markWorking($key); // todo check if this can be achieved without marking here .. .like saving another property in cache
             return $secretsController->get($key);
         }else {
             if ($secretsController->isLatest($key)){
                 // todo add something that registers this api key as not working so that we can stop pinging AWS until it is resolved
-                if (!isset(Config::get('secrets')->$key)) return 'no key exists with the name: ' . $key;
                 return 'Latest secret from aws does not match with the expected value';
             }
             if (!$secondTry){
